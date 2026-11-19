@@ -4,9 +4,8 @@ Lab 11 — Configuration, provider selection, API keys.
 Hai tầng model (không trộn):
 
   Blue Team (CP2–CP3, guardrails / pipeline / protected agent)
-    → CỐ ĐỊNH OpenRouter ``liquid/lfm-3-1.7b:free``
-       https://openrouter.ai/liquid/lfm-3-1.7b:free
-    → Cần ``OPENROUTER_API_KEY``
+    → Mặc định chấm lab: OpenRouter ``liquid/lfm-3-1.7b:free`` + ``OPENROUTER_API_KEY``
+    → Chạy thử với LLMGate: ``BLUE_LLM_PROVIDER=llmgate`` + ``LLMGATE_API_KEY``
 
   Red Team (CP4)
     → Chọn một provider: OpenAI hoặc Gemini
@@ -33,12 +32,15 @@ except ImportError:
 PROVIDER_OPENAI = "openai"
 PROVIDER_GEMINI = "gemini"
 PROVIDER_OPENROUTER = "openrouter"
+PROVIDER_LLMGATE = "llmgate"
 
-# --- Blue Team (LOCKED) ---
+# --- Blue Team ---
 BLUE_PROVIDER = PROVIDER_OPENROUTER
 BLUE_MODEL = "liquid/lfm-3-1.7b:free"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_OPENROUTER_MODEL = BLUE_MODEL  # alias
+LLMGATE_BASE_URL = "https://llmgate.app/v1"
+DEFAULT_LLMGATE_MODEL = "gpt-5.6-luna"
 
 # --- Red Team ---
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
@@ -96,15 +98,19 @@ except FileNotFoundError:
 
 
 # ---------------------------------------------------------------------------
-# Blue Team — fixed OpenRouter Liquid
+# Blue Team — lab defaults and local LLMGate option
 # ---------------------------------------------------------------------------
 
 def get_blue_provider() -> str:
-    return BLUE_PROVIDER
+    provider = os.environ.get("BLUE_LLM_PROVIDER", "").strip().lower() or BLUE_PROVIDER
+    if provider not in (PROVIDER_OPENROUTER, PROVIDER_LLMGATE):
+        raise ValueError("BLUE_LLM_PROVIDER must be openrouter or llmgate")
+    return provider
 
 
 def get_blue_model() -> str:
-    # Hard-locked; env cannot override for the graded Blue Team path.
+    if get_blue_provider() == PROVIDER_LLMGATE:
+        return os.environ.get("LLMGATE_MODEL", "").strip() or DEFAULT_LLMGATE_MODEL
     return BLUE_MODEL
 
 
@@ -113,7 +119,13 @@ def get_openrouter_api_key() -> str:
 
 
 def blue_client_kwargs() -> dict:
-    """OpenAI SDK kwargs pointing at OpenRouter (Blue Team only)."""
+    """Select Blue's endpoint and the credential for that endpoint."""
+    if get_blue_provider() == PROVIDER_LLMGATE:
+        api_key = os.environ.get("LLMGATE_API_KEY", "").strip()
+        if not api_key:
+            raise ValueError("Set LLMGATE_API_KEY in .env when using LLMGate for Blue")
+        return {"api_key": api_key, "base_url": LLMGATE_BASE_URL}
+
     return {
         "api_key": get_openrouter_api_key() or None,
         "base_url": (
@@ -234,13 +246,20 @@ def is_harder_model() -> bool:
     return any(x in m for x in ("gpt-5.6", "pro", "gemini-3.8", "gemini-3.7"))
 
 
-def setup_api_key():
-    """Ensure keys for Blue (OpenRouter) + Red / Red Advance (OpenAI or Gemini)."""
-    if not get_openrouter_api_key():
-        os.environ["OPENROUTER_API_KEY"] = input(
-            "Enter OpenRouter API Key (Blue): "
-        ).strip()
-    print(f"Blue  — {blue_provider_label()}  [LOCKED]")
+def setup_api_key(*, require_red: bool = True):
+    """Load the credentials needed for the selected checkpoints."""
+    if get_blue_provider() == PROVIDER_LLMGATE:
+        blue_client_kwargs()
+        print(f"Blue  — {blue_provider_label()}  [LOCAL OVERRIDE]")
+    else:
+        if not get_openrouter_api_key():
+            os.environ["OPENROUTER_API_KEY"] = input(
+                "Enter OpenRouter API Key (Blue): "
+            ).strip()
+        print(f"Blue  — {blue_provider_label()}  [LOCKED]")
+
+    if not require_red:
+        return
 
     red = get_red_provider()
     model = get_red_model()
@@ -269,7 +288,7 @@ ALLOWED_TOPICS = [
     "loan", "interest", "savings", "credit",
     "deposit", "withdrawal", "balance", "payment",
     "tai khoan", "giao dich", "tiet kiem", "lai suat",
-    "chuyen tien", "the tin dung", "so du", "vay",
+    "chuyen tien", "chuyen khoan", "the tin dung", "so du", "vay",
     "ngan hang", "atm",
 ]
 
